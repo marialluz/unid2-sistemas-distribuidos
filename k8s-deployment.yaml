@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: multicast-service
+spec:
+  clusterIP: None # Headless Service (crucial para DNS direto)
+  selector:
+    app: multicast-app
+  ports:
+  - port: 5000
+    targetPort: 5000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: multicast-app
+spec:
+  serviceName: "multicast-service"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: multicast-app
+  template:
+    metadata:
+      labels:
+        app: multicast-app
+    spec:
+      containers:
+      - name: python-node
+        image: multicast-img:v3
+        imagePullPolicy: Never
+        env:                     
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        ports:
+        - containerPort: 5000
