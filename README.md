@@ -1,120 +1,258 @@
 
-# Q1: Multicast com Ordenação Total (Relógio de Lamport)
+# Sistemas Distribuídos — Algoritmos Clássicos (Q1, Q2 e Q3)
 
-Implementação de um sistema distribuído utilizando **Kubernetes** e **Python** para demonstrar o algoritmo de Multicast com Ordenação Total baseada em Relógios Lógicos de Lamport.
+Este projeto implementa **três algoritmos fundamentais de Sistemas Distribuídos** utilizando **Python (Flask)**, **Docker** e **Kubernetes (Minikube)**, todos centralizados em um único serviço (`main.py`) executado em múltiplos pods.
 
-## 📋 Requisitos do Projeto
-- **API Rest** para comunicação entre processos.
-- **Relógio Lógico de Lamport** para timestamp das mensagens.
-- **Fila de Prioridade** para ordenação das mensagens.
-- **Controle de ACKs**: A mensagem só é processada quando confirmada por todos os nós.
-- **Simulação de Atraso**: Capacidade de atrasar propositalmente um ACK para demonstrar o bloqueio da fila e a garantia da ordem total.
+## Algoritmos implementados
+
+* **Q1** — Multicast com Ordenação Total (Relógio de Lamport)
+* **Q2** — Exclusão Mútua Distribuída (Ricart–Agrawala)
+* **Q3** — Eleição de Líder (Bully Algorithm)
 
 ---
+
+## 🏗️ Arquitetura
+
+* **Linguagem:** Python 3.9
+* **Framework:** Flask (API REST)
+* **Infraestrutura:** Kubernetes (Minikube)
+* **Execução distribuída:** 3 pods (`coord-node-0`, `coord-node-1`, `coord-node-2`)
+* **Comunicação:** HTTP entre pods via DNS estável
+
+Cada pod conhece:
+
+* Seu **ID de processo**
+* O **total de processos**
+* Os **endereços DNS dos peers**
+
+---
+
+## 📂 Estrutura do Projeto
+
+```
+.
+├── Dockerfile
+├── k8s-deployment.yaml
+├── main.py
+├── README.md
+└── scripts/
+    ├── 00_up.sh
+    ├── q1_normal.sh
+    ├── q1_atraso.sh
+    ├── q2_normal.sh
+    └── q3_eleicao.sh
+```
+
+---
+
 ## 🚀 Como Executar
 
-### 1. Pré-requisitos
-Certifique-se de ter instalado:
-- Minikube
-- Docker
-- Kubectl
+### 1️⃣ Pré-requisitos
 
-### 2. Inicialização do Ambiente
-Inicie o Minikube (caso não esteja rodando):
-```bash
-minikube start --driver=docker
-```
+* Docker
+* Minikube
+* Kubectl
 
-### 3\. Build e Deploy
+---
 
-Como estamos usando o Minikube, é necessário construir a imagem docker dentro do ambiente do cluster:
+### 2️⃣ Subir o ambiente
+
+O script abaixo **constrói a imagem, carrega no Minikube e aplica o deployment**:
 
 ```bash
-# 1. Construir a imagem localmente (Tag v3)
-docker build -t multicast-img:v3 .
-
-# 2. Carregar a imagem para o Minikube
-minikube image load multicast-img:v3
-
-# 3. Aplicar os manifestos Kubernetes (Service + StatefulSet)
-kubectl apply -f k8s-deployment.yaml
+./scripts/00_up.sh
 ```
 
-Verifique se os 3 pods estão rodando:
+Verifique se os pods estão rodando:
 
 ```bash
-kubectl get pods -o wide
+kubectl get pods
 ```
 
-*(Aguarde até que o status de todos seja `Running`)*
+Esperado:
 
------
+```
+coord-node-0   Running
+coord-node-1   Running
+coord-node-2   Running
+```
 
-## 🧪 Como Testar
+---
 
-Para visualizar o funcionamento do algoritmo, abra 3 terminais separados para monitorar os logs de cada processo:
+### 3️⃣ Acompanhar logs (recomendado)
 
-  * **Terminal 1:** `kubectl logs -f multicast-app-0`
-  * **Terminal 2:** `kubectl logs -f multicast-app-1`
-  * **Terminal 3:** `kubectl logs -f multicast-app-2`
-
-### Cenário 1: Envio Normal (Sincronia)
-
-Envie uma mensagem a partir do Pod 0. Todos os nós devem receber, trocar ACKs e processar a mensagem quase simultaneamente.
-
-**Comando:**
+Abra **3 terminais**, um para cada pod:
 
 ```bash
-kubectl exec multicast-app-0 -- curl -X POST http://localhost:5000/iniciar_msg \
--H "Content-Type: application/json" \
--d '{"msg": "Ola Mundo Distribuido"}'
+kubectl logs -f coord-node-0
+kubectl logs -f coord-node-1
+kubectl logs -f coord-node-2
 ```
 
-**Resultado esperado nos logs:**
-Todos os pods imprimem: `✅ PROCESSANDO: 'Ola Mundo Distribuido' ...`
+---
 
-### Cenário 2: Simulação de Atraso (Prova da Ordenação Total)
+# Q1 — Multicast com Ordenação Total (Lamport)
 
-Este teste demonstra que se um nó demorar a responder (atraso no ACK), **nenhum** outro nó processa a mensagem até que a confirmação chegue, garantindo a consistência do sistema distribuído.
+## Objetivo
 
-**Passo 1: Ative o modo de atraso no Pod 1**
+Garantir que **todas as mensagens multicast sejam processadas na mesma ordem** em todos os processos, mesmo com atrasos de comunicação.
+
+## Descrição
+
+* Cada mensagem recebe um **timestamp de Lamport**
+* Mensagens são armazenadas em uma **fila de prioridade**
+* Uma mensagem só é processada quando:
+
+  * Foi recebida por todos
+  * Todos os **ACKs** foram contabilizados
+* Existe um modo opcional de **atraso proposital de ACK**
+
+---
+
+## ▶️ Testes do Q1
+
+### Cenário normal
 
 ```bash
-kubectl exec multicast-app-1 -- curl -X POST http://localhost:5000/config/atraso
+./scripts/q1_normal.sh
 ```
 
-**Passo 2: Envie uma mensagem que ativa o gatilho de atraso**
+**Esperado nos logs:**
+
+```
+PROCESSANDO: 'Mensagem X' [Clock: Y, PID: Z]
+```
+
+Mesma ordem em todos os pods.
+
+---
+
+### Cenário com atraso
 
 ```bash
-kubectl exec multicast-app-0 -- curl -X POST http://localhost:5000/iniciar_msg \
--H "Content-Type: application/json" \
--d '{"msg": "Esta mensagem vai ATRASAR"}'
+./scripts/q1_atraso.sh
 ```
 
-**Resultado esperado:**
+**Esperado:**
 
-1.  Todos os logs mostram o recebimento da mensagem.
-2.  **PAUSA DE 10 SEGUNDOS**: Ninguém imprime "PROCESSANDO". A fila fica bloqueada aguardando o Pod 1.
-3.  Após 10s, o Pod 1 envia o ACK e **todos** processam a mensagem simultaneamente.
+* A fila fica bloqueada
+* Nenhum pod processa a mensagem
+* Após o atraso, todos processam juntos
 
------
+---
 
-## 🛠️ Detalhes Técnicos da Implementação
+# Q2 — Exclusão Mútua Distribuída (Ricart–Agrawala)
 
-  * **Linguagem:** Python 3.9
-  * **Comunicação:** API Rest (Flask) rodando na porta 5000.
-  * **Infraestrutura:** Kubernetes StatefulSet.
-      * Garante nomes de rede estáveis: `multicast-app-0`, `multicast-app-1`, `multicast-app-2`.
-  * **Service Discovery:** Headless Service (`clusterIP: None`) permite que os pods resolvam os IPs uns dos outros diretamente pelo DNS.
+## Objetivo
 
-### Estrutura da Mensagem (JSON)
+Garantir que **apenas um processo por vez** entre na **Seção Crítica (SC)**.
 
-```json
-{
-  "uuid": "0-15",       // ID único (ID Processo - Timestamp)
-  "pid": 0,             // ID do processo remetente
-  "clock": 15,          // Relógio Lógico de Lamport no momento do envio
-  "msg": "Conteúdo",
-  "acks": 0             // Contador interno de confirmações recebidas
-}
+## Descrição
+
+* Um processo envia `REQUEST` para todos os outros
+* Os peers respondem com `REPLY` conforme prioridade:
+
+  * Menor timestamp → maior prioridade
+  * Empate → menor PID vence
+* Ao receber todos os `REPLY`, o processo:
+
+  * Entra na SC
+  * Simula trabalho por tempo configurável
+  * Sai automaticamente (`auto-leave`)
+  * Envia replies deferidos
+
+Não há liberação manual.
+
+---
+
+## ▶️ Teste do Q2
+
+```bash
+./scripts/q2_normal.sh
 ```
+
+**Esperado nos logs:**
+
+```
+[Q2] Pedindo CS (req_ts=1)
+[Q2] >>> ENTROU NA SEÇÃO CRÍTICA
+[Q2] <<< SAINDO DA SEÇÃO CRÍTICA (auto)
+```
+
+Nunca existem dois pods na SC ao mesmo tempo.
+
+---
+
+# Q3 — Eleição de Líder (Bully Algorithm)
+
+## Objetivo
+
+Eleger dinamicamente um **líder**, sempre o processo com **maior ID ativo**.
+
+## Descrição
+
+* Um processo inicia eleição (`/q3/start`)
+* Envia `ELECTION` para processos com PID maior
+* Se ninguém responder, ele se torna líder
+* O líder anuncia via `COORDINATOR`
+* Falhas podem ser simuladas via `/q3/fail`
+
+---
+
+## ▶️ Teste do Q3
+
+```bash
+./scripts/q3_eleicao.sh
+```
+
+### Cenários testados automaticamente:
+
+1. Eleição iniciada pelo p0 → p2 vira líder
+2. Falha do líder p2 → nova eleição
+3. p1 assume como novo líder
+
+**Esperado nos logs:**
+
+```
+[Q3] >>> EU (p2) SOU O NOVO LÍDER <<<
+[Q3] COORDINATOR recebido: líder = p2
+```
+
+---
+
+## 🔎 Endpoints Principais
+
+### Q1
+
+* `POST /iniciar_msg`
+* `POST /receber_msg`
+* `POST /receber_ack`
+* `POST /config/atraso`
+
+### Q2
+
+* `POST /q2/enter`
+* `POST /q2/request`
+* `POST /q2/reply`
+* `GET  /q2/state`
+
+### Q3
+
+* `POST /q3/start`
+* `POST /q3/election`
+* `POST /q3/answer`
+* `POST /q3/coordinator`
+* `POST /q3/fail`
+* `GET  /q3/state`
+
+---
+
+## ✅ Conclusão
+
+Este projeto demonstra, de forma prática e observável via logs:
+
+* **Consistência e ordenação total (Q1)**
+* **Exclusão mútua correta sem coordenador central (Q2)**
+* **Eleição dinâmica e tolerante a falhas (Q3)**
+
+Tudo executando em **ambiente distribuído real com Kubernetes**, usando apenas **HTTP e relógios lógicos**.
